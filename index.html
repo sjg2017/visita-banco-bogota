@@ -1,272 +1,295 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard CIRA - Banco de Bogotá</title>
-    
-    <!-- Tailwind CSS para el diseño -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Chart.js para el gráfico de radar -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { Radar } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  RadialLinearScale,
+  PointElement,
+  LineElement,
+  Filler,
+  Tooltip,
+  Legend,
+} from 'chart.js';
 
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&display=swap');
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; }
-        .tab-active { border-bottom: 3px solid #10b981; color: #065f46; font-weight: 700; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        canvas { max-width: 100% !important; height: auto !important; }
-    </style>
-</head>
-<body class="text-slate-900 pb-20">
+ChartJS.register(RadialLinearScale, PointElement, LineElement, Filler, Tooltip, Legend);
 
-    <!-- Encabezado con Progreso -->
-    <header class="bg-slate-900 text-white sticky top-0 z-50 shadow-lg p-4">
-        <div class="max-w-4xl mx-auto flex justify-between items-center">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center text-slate-900 font-bold">B</div>
-                <div>
-                    <h1 class="font-bold text-lg leading-none">Banco de Bogotá</h1>
-                    <p id="syncStatus" class="text-[10px] text-emerald-400 font-bold tracking-widest uppercase">Conectando...</p>
+// Variables proporcionadas por el entorno de ejecución
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : {
+      apiKey: "AIzaSyB0d2y_GTja-q16PJTgOx0oE1xnasHh_y8",
+      authDomain: "bancobogota-cira.firebaseapp.com",
+      projectId: "bancobogota-cira",
+      storageBucket: "bancobogota-cira.firebasestorage.app",
+      messagingSenderId: "388810777038",
+      appId: "1:388810777038:web:589047e2f943afebc8cb9f"
+    };
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-banco-bogota';
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [activeTab, setActiveTab] = useState('contexto');
+  const [checklist, setChecklist] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState(null);
+
+  // Regla 3: Autenticación antes de cualquier consulta
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Error de autenticación:", err);
+        setAuthError(err.message || "Error desconocido de autenticación");
+        setLoading(false);
+      }
+    };
+
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        setAuthError(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Sincronización en tiempo real
+  useEffect(() => {
+    if (!user) return;
+
+    // Regla 1: Ruta corregida a 6 segmentos (par)
+    // artifacts (1) / appId (2) / public (3) / data (4) / status (5) / global (6)
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'status', 'global');
+    
+    const unsubscribe = onSnapshot(docRef, 
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setChecklist(snapshot.data());
+        }
+        setLoading(false);
+      }, 
+      (error) => {
+        console.error("Error de sincronización:", error);
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const toggleItem = async (id) => {
+    if (!user) return;
+    const newState = { ...checklist, [id]: !checklist[id] };
+    setChecklist(newState);
+    
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'status', 'global');
+    try {
+      await setDoc(docRef, newState, { merge: true });
+    } catch (err) {
+      console.error("Error al guardar:", err);
+    }
+  };
+
+  const sections = {
+    contexto: {
+      title: 'Contexto General',
+      items: [
+        { id: 'q1', label: '¿Qué sistemas tienen actualmente?' },
+        { id: 'q2', label: '¿Cómo operan hoy esos sistemas?' },
+        { id: 'q3', label: '¿Nivel de automatización actual?' },
+        { id: 'q4', label: '¿Información centralizada o dispersa?' },
+        { id: 'q5', label: '¿Principales dolores técnicos?' },
+      ]
+    },
+    iluminacion: {
+      title: 'Iluminación',
+      items: [
+        { id: 'i1', label: '¿Control manual o automático?' },
+        { id: 'i2', label: '¿Manejan horarios fijos?' },
+        { id: 'i3', label: '¿Potencial de optimización detectado?' },
+      ]
+    },
+    hvac: {
+      title: 'HVAC (Aire)',
+      items: [
+        { id: 'h1', label: 'Censo de equipos (Referencia/Potencia)' },
+        { id: 'h2', label: 'Modo de activación (BMS/Manual)' },
+        { id: 'h3', label: 'Revisión de Set Points y monitoreo' },
+      ]
+    },
+    respaldo: {
+      title: 'Eléctrico/Baterías',
+      items: [
+        { id: 'r1', label: 'Referencia de baterías y monitoreo RCI' },
+        { id: 'r2', label: 'Existencia de SCADA y protocolos' },
+        { id: 'r3', label: '¿Pruebas manuales o automáticas?' },
+      ]
+    },
+    piloto: {
+      title: 'Piloto CIRA',
+      items: [
+        { id: 'p1', label: 'Espacio en tableros eléctricos' },
+        { id: 'p2', label: 'Permiso toma de fotos y planos' },
+        { id: 'p3', label: 'Validación de personal técnico local' },
+      ]
+    }
+  };
+
+  const progress = useMemo(() => {
+    const total = Object.values(sections).reduce((acc, sec) => acc + sec.items.length, 0);
+    const checked = Object.values(checklist).filter(Boolean).length;
+    return Math.round((checked / total) * 100) || 0;
+  }, [checklist]);
+
+  const radarData = useMemo(() => ({
+    labels: Object.values(sections).map(s => s.title),
+    datasets: [{
+      label: 'Avance %',
+      data: Object.keys(sections).map(key => {
+        const items = sections[key].items;
+        const checkedCount = items.filter(i => checklist[i.id]).length;
+        return (checkedCount / items.length) * 100;
+      }),
+      backgroundColor: 'rgba(16, 185, 129, 0.2)',
+      borderColor: '#10b981',
+      borderWidth: 2,
+      pointBackgroundColor: '#10b981',
+    }]
+  }), [checklist]);
+
+  if (authError) return (
+    <div className="flex items-center justify-center h-screen bg-red-50 p-6">
+      <div className="bg-white p-8 rounded-3xl shadow-xl border border-red-200 max-w-md text-center">
+        <div className="text-red-500 text-5xl mb-4 text-center">⚠️</div>
+        <h2 className="text-xl font-bold text-slate-800 mb-2">Error de Configuración</h2>
+        <p className="text-slate-600 text-sm mb-6">
+          No se pudo iniciar la sesión. Verifica la configuración de Firebase.
+        </p>
+        <div className="bg-slate-100 p-3 rounded text-xs text-red-600 mb-4 overflow-x-auto text-left">
+          {String(authError)}
+        </div>
+        <button onClick={() => window.location.reload()} className="bg-slate-900 text-white px-6 py-2 rounded-full font-bold text-sm">
+          Reintentar conexión
+        </button>
+      </div>
+    </div>
+  );
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-screen bg-slate-50">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="text-slate-600 font-medium italic">Sincronizando con CIRA Cloud...</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-20">
+      <header className="bg-slate-900 text-white p-4 sticky top-0 z-50 shadow-md">
+        <div className="max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center text-slate-900 font-bold italic">B</div>
+            <div>
+              <h1 className="font-bold text-lg leading-none">Banco de Bogotá</h1>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                <p className="text-[10px] text-emerald-400 font-bold tracking-widest uppercase">Levantamiento en tiempo real</p>
+              </div>
+            </div>
+          </div>
+          <div className="w-full md:w-48 bg-slate-800 rounded-full h-3 overflow-hidden relative border border-slate-700">
+            <div className="bg-emerald-500 h-full transition-all duration-700" style={{ width: `${progress}%` }}></div>
+            <span className="absolute inset-0 flex items-center justify-center text-[8px] font-bold">{progress}%</span>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto px-4 py-8">
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-8">
+          <h2 className="text-sm font-bold text-slate-500 uppercase tracking-tighter mb-4 text-center">Madurez de Sistemas</h2>
+          <div className="h-64">
+            <Radar 
+              data={radarData} 
+              options={{ 
+                maintainAspectRatio: false, 
+                scales: { r: { beginAtZero: true, max: 100, ticks: { display: false } } }, 
+                plugins: { legend: { display: false } } 
+              }} 
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto no-scrollbar mb-6 pb-2">
+          {Object.keys(sections).map(key => (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`px-5 py-2 rounded-full text-xs font-bold transition-all whitespace-nowrap ${
+                activeTab === key ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-200' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              {sections[key].title}
+            </button>
+          ))}
+        </div>
+
+        <div className="space-y-4">
+          <h2 className="text-xl font-bold text-slate-800 px-2">{sections[activeTab].title}</h2>
+          <div className="grid gap-3">
+            {sections[activeTab].items.map(item => (
+              <label
+                key={item.id}
+                className={`flex items-center gap-4 p-5 rounded-2xl border transition-all cursor-pointer ${
+                  checklist[item.id] ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-100 hover:border-emerald-200 shadow-sm'
+                }`}
+              >
+                <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${
+                  checklist[item.id] ? 'bg-emerald-500 border-emerald-500' : 'bg-white border-slate-300'
+                }`}>
+                  {checklist[item.id] && <span className="text-white text-xs font-bold">✓</span>}
+                  <input
+                    type="checkbox"
+                    className="hidden"
+                    checked={!!checklist[item.id]}
+                    onChange={() => toggleItem(item.id)}
+                  />
                 </div>
-            </div>
-            <div class="w-32 md:w-48 bg-slate-800 rounded-full h-3 overflow-hidden border border-slate-700">
-                <div id="progressBar" class="bg-emerald-500 h-full transition-all duration-700" style="width: 0%"></div>
-            </div>
-        </div>
-    </header>
-
-    <main class="max-w-4xl mx-auto px-4 py-8">
-        <!-- Gráfico de Madurez -->
-        <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 mb-8">
-            <h2 class="text-xs font-bold text-slate-400 uppercase text-center mb-4 tracking-tighter">Madurez de Sistemas Detectada</h2>
-            <div class="h-64 flex justify-center">
-                <canvas id="maturityChart"></canvas>
-            </div>
+                <span className={`text-sm font-medium ${checklist[item.id] ? 'text-emerald-900' : 'text-slate-700'}`}>
+                  {item.label}
+                </span>
+              </label>
+            ))}
+          </div>
         </div>
 
-        <!-- Navegación por Pestañas -->
-        <div id="tabs" class="flex gap-2 overflow-x-auto no-scrollbar mb-6 pb-2">
-            <button onclick="switchTab('contexto')" id="btn-contexto" class="tab-btn px-5 py-2 bg-white border border-slate-200 rounded-full text-xs font-bold tab-active">Contexto</button>
-            <button onclick="switchTab('iluminacion')" id="btn-iluminacion" class="tab-btn px-5 py-2 bg-white border border-slate-200 rounded-full text-xs font-bold text-slate-500">Iluminación</button>
-            <button onclick="switchTab('hvac')" id="btn-hvac" class="tab-btn px-5 py-2 bg-white border border-slate-200 rounded-full text-xs font-bold text-slate-500">HVAC</button>
-            <button onclick="switchTab('electrico')" id="btn-electrico" class="tab-btn px-5 py-2 bg-white border border-slate-200 rounded-full text-xs font-bold text-slate-500">Baterías</button>
-            <button onclick="switchTab('piloto')" id="btn-piloto" class="tab-btn px-5 py-2 bg-white border border-slate-200 rounded-full text-xs font-bold text-slate-500">Piloto</button>
+        <div className="mt-12 p-6 bg-slate-900 rounded-3xl text-white shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500 opacity-10 rounded-full -mr-10 -mt-10"></div>
+          <h3 className="text-emerald-400 font-bold text-sm mb-2">Recordatorio Estratégico</h3>
+          <p className="text-xs text-slate-300 leading-relaxed italic">
+            "CIRA no es solo monitoreo; es control activo. Durante el levantamiento, identifica los puntos críticos donde el control remoto reduciría costos operativos inmediatos."
+          </p>
         </div>
+      </main>
 
-        <!-- Contenedor de Preguntas -->
-        <div id="questionsList" class="space-y-3">
-            <!-- Se carga dinámicamente -->
+      <footer className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t border-slate-100 p-3 text-center">
+        <div className="flex items-center justify-center gap-2">
+          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Sincronización Cloud Activa</span>
         </div>
-
-        <!-- Alerta de Error de Configuración (Oculta por defecto) -->
-        <div id="configError" class="hidden mt-8 p-6 bg-red-50 border border-red-200 rounded-2xl text-center">
-            <p class="text-red-700 font-bold mb-2">⚠️ Error de Configuración de Firebase</p>
-            <p id="errorMessage" class="text-xs text-red-600">Asegúrate de haber habilitado "Anonymous Auth" en la consola de Firebase y que tus llaves sean correctas.</p>
-        </div>
-    </main>
-
-    <!-- Footer Status -->
-    <footer class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-100 p-3 text-center">
-        <div class="flex items-center justify-center gap-2">
-            <div id="statusDot" class="w-2 h-2 bg-slate-300 rounded-full"></div>
-            <span id="statusLabel" class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Iniciando sistema...</span>
-        </div>
-    </footer>
-
-    <!-- Firebase y Lógica del App -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // Global variables provided by the environment
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-            apiKey: "AIzaSyB0d2y_GTja-q16PJTgOx0oE1xnasHh_y8",
-            authDomain: "bancobogota-cira.firebaseapp.com",
-            projectId: "bancobogota-cira",
-            storageBucket: "bancobogota-cira.firebasestorage.app",
-            messagingSenderId: "388810777038",
-            appId: "1:388810777038:web:589047e2f943afebc8cb9f"
-        };
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'banco-bogota-v1';
-
-        // Inicializar Firebase
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        
-        // Strict path: /artifacts/{appId}/public/data/{collectionName}
-        const docRef = doc(db, "artifacts", appId, "public", "data", "checklist", "global");
-
-        // Definición de las preguntas
-        const sections = {
-            contexto: [
-                { id: 'q1', label: '¿Qué sistemas tienen actualmente?' },
-                { id: 'q2', label: '¿Cómo operan hoy esos sistemas?' },
-                { id: 'q3', label: '¿Nivel de automatización actual?' },
-                { id: 'q4', label: '¿Información centralizada o dispersa?' },
-                { id: 'q5', label: '¿Principales dolores técnicos?' }
-            ],
-            iluminacion: [
-                { id: 'i1', label: 'Control Manual vs Automático' },
-                { id: 'i2', label: 'Manejo de horarios fijos' },
-                { id: 'i3', label: 'Potencial de ahorro detectado' }
-            ],
-            hvac: [
-                { id: 'h1', label: 'Censo de equipos (Ref/Potencia)' },
-                { id: 'h2', label: 'Activación (BMS/Manual)' },
-                { id: 'h3', label: 'Set points de temperatura' }
-            ],
-            electrico: [
-                { id: 'r1', label: 'Ref. baterías y monitoreo RCI' },
-                { id: 'r2', label: 'Existencia de SCADA y protocolos' },
-                { id: 'r3', label: 'Pruebas manuales o automáticas' }
-            ],
-            piloto: [
-                { id: 'p1', label: 'Espacio en tableros eléctricos' },
-                { id: 'p2', label: 'Permiso toma de fotos y planos' },
-                { id: 'p3', label: 'Validación personal técnico' }
-            ]
-        };
-
-        let localState = {};
-        let activeTab = 'contexto';
-        let radarChart;
-
-        // RULE 3: Auth Before Queries
-        const initAuth = async () => {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (err) {
-                console.error("Auth Error:", err);
-                document.getElementById('configError').classList.remove('hidden');
-                document.getElementById('errorMessage').innerText = err.message;
-            }
-        };
-
-        initAuth();
-
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                document.getElementById('syncStatus').innerText = "Sincronizado";
-                document.getElementById('statusDot').className = "w-2 h-2 bg-emerald-500 rounded-full animate-pulse";
-                document.getElementById('statusLabel').innerText = "Conexión en vivo activa";
-                
-                // Escuchar cambios de la nube con error callback
-                onSnapshot(docRef, (snap) => {
-                    if (snap.exists()) {
-                        localState = snap.data();
-                        renderQuestions();
-                        updateRadar();
-                    }
-                }, (error) => {
-                    console.error("Snapshot Error:", error);
-                });
-            }
-        });
-
-        // Cambiar entre pestañas
-        window.switchTab = (tab) => {
-            activeTab = tab;
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.classList.remove('tab-active', 'text-slate-900');
-                btn.classList.add('text-slate-500');
-            });
-            document.getElementById('btn-' + tab).classList.add('tab-active', 'text-slate-900');
-            renderQuestions();
-        };
-
-        // Dibujar preguntas
-        function renderQuestions() {
-            const container = document.getElementById('questionsList');
-            if (!container) return;
-            container.innerHTML = "";
-            
-            sections[activeTab].forEach(item => {
-                const checked = localState[item.id] || false;
-                const div = document.createElement('div');
-                div.className = `flex items-center gap-4 p-5 rounded-2xl border transition-all cursor-pointer ${checked ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-100 shadow-sm'}`;
-                div.innerHTML = `
-                    <div class="w-6 h-6 rounded-md border-2 flex items-center justify-center ${checked ? 'bg-emerald-500 border-emerald-500' : 'bg-white border-slate-300'}">
-                        ${checked ? '<span class="text-white text-xs font-bold">✓</span>' : ''}
-                    </div>
-                    <span class="text-sm font-medium ${checked ? 'text-emerald-900' : 'text-slate-700'}">${item.label}</span>
-                `;
-                div.onclick = () => toggleItem(item.id);
-                container.appendChild(div);
-            });
-            
-            // Actualizar barra de progreso superior
-            const allIds = Object.values(sections).flat().map(i => i.id);
-            const totalChecked = allIds.filter(id => localState[id]).length;
-            const pct = (totalChecked / allIds.length) * 100;
-            document.getElementById('progressBar').style.width = pct + '%';
-        }
-
-        async function toggleItem(id) {
-            if (!auth.currentUser) return;
-            localState[id] = !localState[id];
-            renderQuestions();
-            updateRadar();
-            // Guardar en Firebase
-            try {
-                await setDoc(docRef, localState, { merge: true });
-            } catch (e) {
-                console.error("Error guardando:", e);
-            }
-        }
-
-        // Gráfico de Radar
-        function initRadar() {
-            const ctx = document.getElementById('maturityChart').getContext('2d');
-            radarChart = new Chart(ctx, {
-                type: 'radar',
-                data: {
-                    labels: ['Contexto', 'Luz', 'HVAC', 'Baterías', 'Piloto'],
-                    datasets: [{
-                        data: [0, 0, 0, 0, 0],
-                        backgroundColor: 'rgba(16, 185, 129, 0.2)',
-                        borderColor: '#10b981',
-                        borderWidth: 2,
-                        pointBackgroundColor: '#10b981'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        r: {
-                            beginAtZero: true,
-                            max: 100,
-                            ticks: { display: false },
-                            grid: { color: 'rgba(0,0,0,0.05)' }
-                        }
-                    },
-                    plugins: { legend: { display: false } }
-                }
-            });
-        }
-
-        function updateRadar() {
-            if (!radarChart) return;
-            const scores = Object.keys(sections).map(key => {
-                const items = sections[key];
-                const checked = items.filter(i => localState[i.id]).length;
-                return (checked / items.length) * 100;
-            });
-            radarChart.data.datasets[0].data = scores;
-            radarChart.update();
-        }
-
-        // Inicio
-        initRadar();
-        renderQuestions();
-    </script>
-</body>
-</html>
+      </footer>
+    </div>
+  );
+}
